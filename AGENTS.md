@@ -9,6 +9,7 @@ Global user Codex rules continue to apply. Keep this project a small embeddable 
 - Root Go package contains definition validation, bounded RAM storage, persistence, and HTTP mounting.
 - `ui.html` is embedded with `go:embed`: plain HTML/CSS/JavaScript and SVG, no frontend build or CDN.
 - `examples/basic` is the runnable integration example. `*_test.go` uses the standard testing package.
+- Keep `README.md` in English and focused on the product, use cases, and quick start. Maintain configuration, API, persistence, and operations details in `docs/usage.md`; keep both consistent with the implementation.
 - No container delivery, database, standalone frontend, or extra telemetry stack is required.
 
 ## Setup and exact checks

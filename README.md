@@ -1,66 +1,69 @@
 # rtmoinit
 
-Thư viện dashboard realtime nhúng vào ứng dụng Go + Fiber v3. Ứng dụng tự định nghĩa dashboard bằng Go: stat, biểu đồ line/bar và bảng. Ghi dữ liệu vào RAM; Redis tùy chọn để khôi phục sau restart.
+**Live dashboards, built into your Go application.**
 
-Go 1.27.4. Không cần frontend build, CDN, Prometheus hoặc server dashboard riêng.
+rtmoinit is an embeddable monitoring dashboard for Go and Fiber v3. Turn application metrics and operational data into live stats, charts, and tables, served directly from your application.
 
-## Chạy ví dụ
+Define dashboards in Go, update values in memory, and open them in a browser. The UI ships inside your binary, with no frontend build, CDN, or separate dashboard server. Add Redis when you want to restore dashboard state after a restart.
+
+## What you can build
+
+- **Service overviews** with request counters, latency trends, and current health indicators supplied by your application.
+- **Worker dashboards** showing job totals, queue depth, and worker status tables.
+- **Internal operations views** with multiple dashboards and layouts defined alongside your application code.
+
+Your application supplies the data through a small Go API; rtmoinit handles sampling, recent history, and live browser updates.
+
+## Features
+
+- **Stats, line charts, bar charts, and tables.** Combine gauges, cumulative counters, and structured rows in responsive dashboards.
+- **Live browser updates.** Server-Sent Events refresh connected dashboards every second and restore the view after reconnecting.
+- **Memory-first writes.** Metric updates stay in RAM; optional Redis checkpoints run independently of sampling.
+- **Bounded retention and capacity.** Configure history, series, table, checkpoint, and connection limits.
+- **Optional restart recovery.** Save compressed snapshots to Redis and restore compatible dashboard state at startup.
+- **Fits your existing app.** Mount read-only UI and JSON routes under a Fiber group protected by your authentication middleware.
+
+## Try it locally
+
+Requires Go 1.27.4 or later.
 
 ```sh
+git clone https://github.com/sonseait/rtmoinit.git
+cd rtmoinit
 go mod download
 go run ./examples/basic
 ```
 
-Mở http://127.0.0.1:3000/monitor/. Ví dụ ghi dữ liệu giả mỗi 250 ms.
+Open **[http://127.0.0.1:3000/monitor/](http://127.0.0.1:3000/monitor/)** to see request stats, a latency chart, a bar chart, and a worker table populated with demo data.
 
-Bật checkpoint Redis:
+To try restart recovery with a running Redis instance:
 
 ```sh
 REDIS_ADDR=127.0.0.1:6379 go run ./examples/basic
 ```
 
-Có thể cấu hình `REDIS_USERNAME`, `REDIS_PASSWORD`, `LISTEN_ADDR`. Ví dụ mặc định chỉ nghe localhost. Dừng bằng Ctrl+C để checkpoint và shutdown.
+The example also accepts `REDIS_USERNAME`, `REDIS_PASSWORD`, and `LISTEN_ADDR`. It binds to localhost by default and handles shutdown with Ctrl+C.
 
-## Tích hợp
-
-Trước khi module được publish, thêm local replacement trong project sử dụng:
+## Add it to your application
 
 ```sh
-go mod edit -replace github.com/sonseait/rtmoinit=../rtmoinit
 go get github.com/sonseait/rtmoinit
 ```
 
+Inside your Fiber application, import `github.com/sonseait/rtmoinit`, then define and mount a dashboard. This integration fragment assumes an existing `ctx`, Fiber `app`, and `yourAuthMiddleware`:
+
 ```go
-import (
-    "context"
-    "time"
-
-    "github.com/gofiber/fiber/v3"
-    "github.com/redis/go-redis/v9"
-    "github.com/sonseait/rtmoinit"
-)
-
-client := redis.NewClient(&redis.Options{
-    Addr: "127.0.0.1:6379",
-    ContextTimeoutEnabled: true,
-    MaxRetries: -1,
-    DialTimeout: 3 * time.Second,
-})
-// Ứng dụng đóng client sau khi monitor.Close hoàn tất.
-
-monitor, err := rtmoinit.New(context.Background(), rtmoinit.Config{
-    Redis: client, // bỏ trường này để chỉ dùng RAM
-    Namespace: "my-service-instance-1",
+monitor, err := rtmoinit.New(ctx, rtmoinit.Config{
     Definition: rtmoinit.Definition{
         Series: []rtmoinit.Series{
             {ID: "requests", Title: "Requests", Kind: rtmoinit.Counter},
             {ID: "latency", Title: "Latency", Unit: "ms", Kind: rtmoinit.Gauge},
         },
         Dashboards: []rtmoinit.Dashboard{{
-            ID: "overview", Title: "Overview",
+            ID: "overview", Title: "Service overview",
             Panels: []rtmoinit.Panel{
-                {ID: "requests", Title: "Requests", Type: rtmoinit.Stat, Series: []string{"requests"}},
-                {ID: "latency", Title: "Latency", Type: rtmoinit.Line, Series: []string{"latency"}},
+                {ID: "requests", Title: "Total requests", Type: rtmoinit.Stat, Series: []string{"requests"}},
+                {ID: "latency", Title: "Latency over time", Type: rtmoinit.Line, Series: []string{"latency"}},
             },
         }},
     },
@@ -69,7 +72,6 @@ if err != nil {
     return err
 }
 
-app := fiber.New()
 monitor.Mount(app.Group("/monitor", yourAuthMiddleware))
 
 if err := monitor.Add("requests", 1); err != nil {
@@ -80,85 +82,30 @@ if err := monitor.Set("latency", 42.5); err != nil {
 }
 ```
 
-`yourAuthMiddleware` là middleware xác thực của ứng dụng. Định nghĩa toàn bộ dashboard trong `Config.Definition` trước `New` để kiểm tra và restore cùng một schema. Không có đăng ký động sau startup.
+Call `Add` for counters, `Set` for gauges, and `SetRows` for tables from your application code. Define the complete dashboard before calling `New`, mount it before starting the server, and call `Close(ctx)` during shutdown to stop workers and attempt a final checkpoint.
 
-- `Set` dành cho gauge; `Add` dành cho counter, delta không âm. Counter tiếp tục từ checkpoint đã restore.
-- Giá trị số dùng `float64`, phục vụ hiển thị; không dùng làm sổ cái hoặc lưu số nguyên cần chính xác ngoài phạm vi IEEE 754.
-- `SetRows(tableID, []rtmoinit.Row)` thay toàn bộ bảng. Khai báo cột trong `Definition.Tables`, rồi dùng panel `TablePanel` với trường `Table`. Cell nhận string, bool, số hữu hạn hoặc nil; không nhận object/array. Số nguyên được chuẩn hóa sang `float64`.
-- ID dài 1–128 ký tự, gồm chữ/số và `_.-`, bắt đầu bằng chữ/số. Series/table dùng ID toàn cục; panel ID duy nhất trong từng dashboard.
-- Panel `Width` là 1–12 cột, mặc định 6; trên mobile luôn đầy chiều ngang. Stat tham chiếu đúng một series; line/bar có thể chứa nhiều series.
-- Dữ liệu đầu vào được sao chép. `Snapshot()` trả bản sao có thể đọc/sửa độc lập. Snapshot không phải transaction giữa nhiều series.
-- Ứng dụng xử lý lỗi cập nhật; `errors.Is` nhận diện `ErrInvalid`, `ErrLimit`, `ErrClosed`.
+See the [complete runnable example](examples/basic/main.go) for tables, all panel types, optional Redis, and graceful shutdown.
 
-Ví dụ đầy đủ có bảng, line, bar và shutdown: [examples/basic/main.go](examples/basic/main.go).
+## How it fits
 
-## RAM, realtime và giới hạn
+rtmoinit is designed for visibility into an individual application instance: recent trends, current values, and small operational tables. Defaults include one hour of history, one-second sampling, and Redis checkpoints every ten seconds when enabled.
 
-| Cấu hình | Mặc định |
-| --- | --- |
-| `History` | 1 giờ |
-| `SampleInterval` | 1 giây |
-| `FlushInterval` | 10 giây |
-| `FlushTimeout` | 3 giây, gồm thời gian chờ slot checkpoint |
-| `MaxSeries` | 100 |
-| `MaxRows` | 1.000 dòng/bảng |
-| `MaxCheckpointBytes` | 10 MiB, sau gzip |
-| `MaxClients` | 100 kết nối SSE |
-| `Namespace` | `rtmoinit` |
+Each Redis namespace supports one active writer. Counters display cumulative totals; calculate rates in your application when needed. Protect the entire mounted route group with authentication before exposing it beyond localhost. Checkpoints provide periodic recovery; a crash can lose updates since the last successful save.
 
-Giá trị zero dùng mặc định; giá trị âm bị từ chối. Ring buffer mỗi series giữ tối đa `History / SampleInterval` mẫu, làm tròn xuống. Gauge lấy giá trị cuối; counter lấy tổng tích lũy, không tự chuyển thành rate. Chưa có dữ liệu thì stat hiển thị `—`. Không nội suy khi process ngừng chạy.
+## Documentation
 
-Tổng JSON bảng tối đa bằng nửa `MaxCheckpointBytes`. Quá giới hạn dòng/byte sẽ từ chối cập nhật và giữ dữ liệu trước đó. Checkpoint vượt giới hạn nén hoặc 16 lần giới hạn sau giải nén sẽ bị từ chối, giữ checkpoint đã lưu; lỗi hiển thị trên UI/status. Điều chỉnh giới hạn cùng thời gian giữ khi số lượng series hoặc dữ liệu tăng.
+- [Usage and operations guide](docs/usage.md): data model, configuration limits, Redis lifecycle, HTTP endpoints, and SSE behavior.
+- [Integration example](examples/basic/main.go): a working Fiber application with generated data.
+- [Contributor instructions](AGENTS.md): project conventions and development checks.
 
-SSE cập nhật mỗi giây. Kết nối mới nhận snapshot đầy đủ; các lần sau nhận cửa sổ mẫu chồng lặp ngắn để ghép lịch sử. Client chậm hoặc reconnect nhận lại snapshot đầy đủ, không replay event log. Bản update được serialize dùng chung giữa các client; kết nối có thời hạn ghi 5 giây. Bảng vẫn truyền toàn bộ snapshot mới nhất, phù hợp bảng giám sát nhỏ.
-
-UI dùng plain HTML/CSS/JavaScript và SVG được nhúng trong binary. Chuỗi thời gian hiển thị theo giờ trình duyệt. Biểu đồ bar hiển thị tối đa 120 cột/series, chọn một mẫu mỗi nhóm; không tự tính tổng nhóm.
-
-## Checkpoint Redis
-
-Luồng ghi `Set`/`Add` chỉ cập nhật RAM. Sampling và persistence là hai worker độc lập. Worker checkpoint sao chép từng series dưới khóa riêng, sau đó encode JSON và nén gzip ở ngoài khóa; dùng một lệnh `SET` thay thế nguyên tử key `<namespace>:checkpoint`, không đặt TTL.
-
-Chỉ một checkpoint hoạt động tại một thời điểm. Worker không tạo hàng đợi khi Redis chậm. `Flush(ctx)` cho phép checkpoint thủ công, chờ slot trong deadline. Không có Redis thì `Flush` không làm gì.
-
-Client Redis phải bật `ContextTimeoutEnabled: true`. Khuyến nghị client/pool riêng với `MaxRetries: -1` và dial timeout hữu hạn để checkpoint không tranh connection với luồng nghiệp vụ. Redis server riêng hữu ích khi cần cách ly CPU/RAM/eviction; DB index khác vẫn dùng chung tài nguyên server.
-
-- Startup: Redis chưa có key thì bắt đầu rỗng. Không đọc được, checkpoint hỏng, khác version hoặc khác định nghĩa/thời gian lấy mẫu thì `New` trả lỗi, không ghi đè dữ liệu đã lưu.
-- Runtime: Redis lỗi vẫn tiếp tục ghi RAM, thử lại ở chu kỳ sau. `Status()` và `/status` báo lỗi, lần thử, thời gian ghi và lần thành công gần nhất.
-- Shutdown: dừng các goroutine của ứng dụng đang cập nhật, gọi `Close(ctx)`, rồi mới đóng Redis. `Close` từ chối ghi mới, đợi checkpoint đang chạy và thử ghi lần cuối. Nên dành ít nhất `2 * FlushTimeout` cho shutdown. Context hết hạn chỉ dừng chờ; cleanup tiếp tục trong nền.
-- Thay đổi definition: đổi namespace để bắt đầu mới; hoặc chủ động xóa key checkpoint cũ nếu chấp nhận mất lịch sử. Thư viện không tự migrate hay xóa dữ liệu.
-
-Mỗi namespace chỉ có **một instance đang ghi**. Không hỗ trợ distributed aggregation hoặc nhiều writer cùng key. Checkpoint có thể mất phần RAM chưa lưu khi crash; Redis lỗi kéo dài làm khoảng dữ liệu có thể mất tăng lên. Timeout sau khi gửi `SET` có thể có kết quả không xác định: Redis có thể đã nhận snapshot đầy đủ. Độ bền khi Redis restart phụ thuộc cấu hình AOF/RDB và storage của Redis.
-
-## HTTP
-
-Tất cả route tương đối với group truyền vào `Mount`:
-
-| Method | Route | Nội dung |
-| --- | --- | --- |
-| GET | `/` | UI nhúng |
-| GET | `/definition` | Dashboard/series/table cùng `historyMs`, `sampleIntervalMs` |
-| GET | `/snapshot` | Giá trị, lịch sử, bảng và trạng thái checkpoint |
-| GET | `/status` | Trạng thái checkpoint |
-| GET | `/events` | SSE `snapshot` đầy đủ hoặc `update` cửa sổ ngắn |
-
-Mẫu lịch sử là `[unixMilliseconds, value]`. `update` chứa giá trị hiện tại của mọi series, lịch sử ngắn và toàn bộ bảng; ghép mẫu theo timestamp và loại lịch sử quá `historyMs`. UI sẵn có thực hiện việc ghép này.
-
-Mount một lần trước khi server chạy. Gắn xác thực trên group để bảo vệ **toàn bộ** route; thư viện không có tài khoản riêng hay remote write API. EventSource dùng cookie cùng origin. Nếu reverse proxy có buffer/compression, tắt chúng cho SSE và đặt read timeout dài hơn chu kỳ update.
-
-## Kiểm tra
+## Development
 
 ```sh
 go mod download
-gofmt -w .
 test -z "$(gofmt -l .)"
 go vet ./...
 go test -race ./...
 go build ./...
-go test -run '^$' -bench BenchmarkAdd -benchmem
 ```
 
-Test Redis tự skip nếu chưa đặt địa chỉ. Chỉ dùng Redis test riêng vì suite có `CLIENT PAUSE`; không chạy vào Redis nghiệp vụ:
-
-```sh
-RTMOINIT_TEST_REDIS_ADDR=127.0.0.1:6379 go test -race ./...
-```
+Redis integration tests are opt-in and require a dedicated test instance. See the [testing guide](docs/usage.md#testing) before enabling them.
