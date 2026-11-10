@@ -16,7 +16,7 @@ Your application supplies the data through a small Go API; rtmoinit handles samp
 
 ## Features
 
-- **Stats, line charts, bar charts, and tables.** Combine gauges, cumulative counters, and structured rows in responsive dashboards.
+- **Stats, line charts, bar charts, and tables.** Combine gauges, cumulative counters, and structured rows in compact, orange/black terminal-style dashboards.
 - **Live browser updates.** Server-Sent Events refresh connected dashboards every second and restore the view after reconnecting.
 - **Memory-first writes.** Metric updates stay in RAM; optional Redis checkpoints run independently of sampling.
 - **Bounded retention and capacity.** Configure history, series, table, checkpoint, and connection limits.
@@ -107,5 +107,7 @@ go vet ./...
 go test -race ./...
 go build ./...
 ```
+
+Run `node ui_test.cjs` with Node.js to check responsive SVG chart geometry and dashboard navigation without browser or npm dependencies.
 
 Redis integration tests are opt-in and require a dedicated test instance. See the [testing guide](docs/usage.md#testing) before enabling them.

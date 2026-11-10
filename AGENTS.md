@@ -7,7 +7,7 @@ Global user Codex rules continue to apply. Keep this project a small embeddable 
 - Module: `github.com/sonseait/rtmoinit`, Go 1.27.4 (stable release verified at creation).
 - Fiber v3 serves read-only routes; go-redis/v9 is the optional checkpoint client.
 - Root Go package contains definition validation, bounded RAM storage, persistence, and HTTP mounting.
-- `ui.html` is embedded with `go:embed`: plain HTML/CSS/JavaScript and SVG, no frontend build or CDN.
+- `ui.html` is embedded with `go:embed`: plain HTML/CSS/JavaScript and SVG, no frontend build or CDN. Keep its compact orange/black terminal style, system monospace fonts, square borders, visible keyboard focus, and mobile layout. Only show dashboard navigation when at least two dashboards exist. Charts must fill the available panel width without stretching axis labels.
 - `examples/basic` is the runnable integration example. `*_test.go` uses the standard testing package.
 - Keep `README.md` in English and focused on the product, use cases, and quick start. Maintain configuration, API, persistence, and operations details in `docs/usage.md`; keep both consistent with the implementation.
 - No container delivery, database, standalone frontend, or extra telemetry stack is required.
@@ -24,7 +24,7 @@ go build ./...
 go run ./examples/basic
 ```
 
-`go vet ./...` is the lint/static check; Go compilation performs type checking. There is no separate frontend package manager or lint command.
+`go vet ./...` is the lint/static check; Go compilation performs type checking. There is no separate frontend package manager or lint command. Run `node ui_test.cjs` (Node.js required) to check responsive SVG chart geometry and dashboard navigation.
 
 Redis integration tests skip unless a dedicated Redis address is set:
 
@@ -43,5 +43,5 @@ The integration suite issues `CLIENT PAUSE`; never point it at shared or product
 - Sampling and persistence run independently. One checkpoint at a time; Redis operations must respect context deadlines. The caller owns the Redis client.
 - Bound history, table rows/bytes, checkpoint bytes, and SSE clients. Keep background failures visible in status; never erase a stored checkpoint because restore failed.
 - One active writer per Redis namespace. Do not add distributed aggregation implicitly.
-- Mount routes under the application's authentication middleware. Render supplied text safely; preserve keyboard access, semantic tables, and responsive layouts.
+- Mount routes under the application's authentication middleware. Render supplied text safely; preserve keyboard access, semantic tables with accessible names, and responsive layouts. Show table panel titles once; do not repeat them in a visible caption.
 - Add focused standard-library tests for non-trivial changes. Run relevant checks and report any that could not run. Document any new commands or lifecycle behavior here and in README.

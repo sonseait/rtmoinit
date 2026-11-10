@@ -39,6 +39,8 @@ Panel `Width` ranges from 1 to 12 grid columns and defaults to 6. Panels fill th
 
 Declare table columns in `Definition.Tables`. Each `Column` has a `Key` and display `Label`. Use `SetRows(tableID, []rtmoinit.Row{...})` to replace rows; row keys must match declared columns.
 
+Table panels show their title once above the table; the table uses the same title as its accessible name.
+
 Cells accept strings, booleans, finite numbers, or `nil`. Objects and arrays are rejected. Integer values are normalized to `float64`. Row or byte limit violations reject the entire update and preserve the previous table contents.
 
 ## Configuration and capacity
@@ -121,7 +123,9 @@ History points encode `[unixMilliseconds, value]`. Custom clients should merge p
 
 Serialized update frames are shared between clients. Connections have a five-second write deadline. Tables are sent in full, making this approach suitable for small monitoring tables.
 
-The UI uses plain HTML, CSS, JavaScript, and SVG embedded in the Go binary, with no frontend build or CDN dependencies.
+The UI uses a compact orange/black terminal style: system monospace fonts, square panels, small controls, dense tables, and warm chart colors. Panels stack on mobile, dashboard navigation appears only when two or more dashboards are defined and supports keyboard focus, and touch devices get larger button targets. Charts fill the panel width, adapt when the window is resized, and stay 180px high and tables scroll after 260px.
+
+It uses plain HTML, CSS, JavaScript, and SVG embedded in the Go binary, with no frontend build or CDN dependencies.
 
 ## Testing
 
@@ -136,7 +140,7 @@ go test -race ./...
 go build ./...
 ```
 
-Go compilation checks types; `go vet` is the static check. There is no separate frontend package manager or lint command.
+Go compilation checks types; `go vet` is the static check. There is no separate frontend package manager or lint command. With Node.js installed, run `node ui_test.cjs` to check SVG chart geometry at mobile and desktop widths and single/multiple dashboard navigation; no npm dependencies are needed.
 
 To run the update benchmark:
 
