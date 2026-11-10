@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Realtime dashboard</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#10151f;color:#e5edf9}*{box-sizing:border-box}body{margin:0}header,main{max-width:1440px;margin:auto;padding:24px}header{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;border-bottom:1px solid #2b3547}h1{font-size:21px;margin:0}h2{font-size:15px;margin:0 0 16px}nav{display:flex;gap:8px;flex-wrap:wrap}button{font:inherit;background:#1d283a;color:inherit;border:1px solid #35455e;padding:8px 14px;border-radius:6px;cursor:pointer}button[aria-pressed=true]{background:#283e5f;border-color:#74b5ff}button:focus-visible{outline:3px solid #93c5fd;outline-offset:3px}#connection,#checkpoint{font-size:13px;color:#aabbd3}#checkpoint{padding:12px 24px 0;max-width:1440px;margin:auto;overflow-wrap:anywhere}.grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:18px}.panel{grid-column:span var(--width);background:#171f2d;border:1px solid #2b3547;border-radius:10px;padding:20px;min-width:0}.stat{font-size:36px;font-variant-numeric:tabular-nums}.unit{font-size:14px;color:#aabbd3;margin-left:8px}.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;margin-top:8px}.swatch{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px}.chart{display:block;width:100%;height:auto}.chart text{fill:#aabbd3;font:11px system-ui}.scroll{overflow:auto;max-height:360px}table{border-collapse:collapse;width:100%;font-size:13px}th,td{text-align:left;padding:10px;border-bottom:1px solid #2b3547;overflow-wrap:anywhere;max-width:400px}th{position:sticky;top:0;background:#171f2d}.empty{color:#aabbd3;font-size:13px}#error{color:#fda4af;max-width:1440px;margin:0 auto;padding:0 24px}footer{max-width:1440px;margin:auto;padding:0 24px 24px;color:#aabbd3;font-size:12px}@media(max-width:700px){.panel{grid-column:span 12}header,main{padding:16px}}
+</style>
+</head>
+<body>
+<header><h1 id="title">Realtime dashboard</h1><nav aria-label="Dashboards" id="nav"></nav><span id="connection" role="status">Connecting…</span></header>
+<p id="checkpoint" role="status"></p><p id="error" role="alert"></p><main id="panels" class="grid" aria-label="Dashboard panels"></main><footer>History samples reflect the last value in each interval. Gaps indicate missing samples.</footer>
+<script>
+'use strict';
+const base=location.pathname.replace(/\/$/,'');
+const colors=['#74b5ff','#5eead4','#fbbf24','#f9a8d4','#c4b5fd','#fb923c'];
+const number=new Intl.NumberFormat(undefined,{maximumFractionDigits:3});
+const stamp=new Intl.DateTimeFormat(undefined,{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+let definition,active,latest,source;
+const byID=id=>document.getElementById(id);
+function element(tag,text,className){const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(className)e.className=className;return e;}
+function svg(tag,attrs,text){const e=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const [k,v]of Object.entries(attrs))e.setAttribute(k,String(v));if(text!==undefined)e.textContent=text;return e;}
+function chart(panel,snapshot){
+ const root=svg('svg',{viewBox:'0 0 600 220',class:'chart',role:'img','aria-label':(panel.title||panel.id)+' time series'});
+ const entries=panel.series.map(id=>({id,def:definition.series.find(s=>s.id===id),data:snapshot.series[id]}));
+ const points=entries.flatMap(s=>s.data.history);
+ if(!points.length)return element('p','Waiting for samples…','empty');
+ const loT=Math.min(...entries.filter(s=>s.data.history.length).map(s=>s.data.history[0][0]));
+ const hiT=Math.max(loT+1000,snapshot.time);
+ let lo=0,hi=0;for(const p of points){lo=Math.min(lo,p[1]);hi=Math.max(hi,p[1]);}if(hi===lo)hi=lo+1;
+ const scale=Math.max(Math.abs(lo),Math.abs(hi)),low=lo/scale,high=hi/scale;
+ const x=t=>55+(t-loT)/(hiT-loT)*530,y=v=>180-(v/scale-low)/(high-low)*155;
+ for(let i=0;i<4;i++){const v=(low+(high-low)*i/3)*scale,py=y(v);root.append(svg('line',{x1:55,x2:585,y1:py,y2:py,stroke:'#2b3547'}),svg('text',{x:48,y:py+4,'text-anchor':'end'},number.format(v)));}
+ root.append(svg('text',{x:55,y:208},stamp.format(loT)),svg('text',{x:585,y:208,'text-anchor':'end'},stamp.format(hiT)));
+ entries.forEach((s,index)=>{
+  const color=colors[index%colors.length],history=s.data.history;
+  const step=definition.sampleIntervalMs;
+  if(panel.type==='bar'){
+   // ponytail: render at most 120 bars per series; add server-side aggregation for denser charts.
+   const stride=Math.max(1,Math.ceil(history.length/120));
+   const width=Math.max(.5,Math.min(20,530/Math.min(120,history.length)/entries.length));
+   for(let i=0;i<history.length;i+=stride){const p=history[i],top=Math.min(y(p[1]),y(0));const r=svg('rect',{x:x(p[0])+index*width,y:top,width,height:Math.max(1,Math.abs(y(p[1])-y(0))),fill:color});r.append(svg('title',{},stamp.format(p[0])+': '+number.format(p[1])));root.append(r);}
+  }else{
+   let path='';history.forEach((p,i)=>{path+=(i===0||p[0]-history[i-1][0]>step*1.5?'M':'L')+x(p[0]).toFixed(2)+','+y(p[1]).toFixed(2);});
+   root.append(svg('path',{d:path,fill:'none',stroke:color,'stroke-width':2}));
+   if(history.length===1)root.append(svg('circle',{cx:x(history[0][0]),cy:y(history[0][1]),r:3,fill:color}));
+  }
+ });
+ const box=element('div');box.append(root);const legend=element('div',undefined,'legend');
+ entries.forEach((s,i)=>{const label=element('span'),swatch=element('span',undefined,'swatch');swatch.style.background=colors[i%colors.length];label.append(swatch,document.createTextNode((s.def.title||s.id)+(s.def.unit?' ('+s.def.unit+')':'')));legend.append(label);});box.append(legend);return box;
+}
+function render(){
+ if(!latest||!active)return;
+ const panels=byID('panels');panels.replaceChildren();
+ for(const p of active.panels){
+  const card=element('section',undefined,'panel');card.style.setProperty('--width',p.width);card.append(element('h2',p.title||p.id));
+  if(p.type==='stat'){
+   const id=p.series[0],value=latest.series[id].value,def=definition.series.find(s=>s.id===id),stat=element('div',value===null?'—':number.format(value),'stat');stat.append(element('span',def.unit||'','unit'));card.append(stat);
+  }else if(p.type==='table'){
+   const def=definition.tables.find(t=>t.id===p.table),rows=latest.tables[p.table],wrap=element('div',undefined,'scroll'),table=element('table');table.append(element('caption',p.title||p.id));
+   const head=element('thead'),tr=element('tr');for(const c of def.columns){const th=element('th',c.label||c.key);th.scope='col';tr.append(th);}head.append(tr);table.append(head);
+   const body=element('tbody');for(const row of rows){const tr=element('tr');for(const c of def.columns){const v=row[c.key];tr.append(element('td',v==null?'—':typeof v==='number'?number.format(v):String(v)));}body.append(tr);}table.append(body);wrap.append(table);card.append(wrap);if(!rows.length)card.append(element('p','No rows','empty'));
+  }else card.append(chart(p,latest));
+  panels.append(card);
+ }
+ const status=latest.status;
+ byID('checkpoint').textContent=!status.persistence?'Storage: RAM only':status.lastError?'Checkpoint failed: '+status.lastError:'Redis checkpoint: '+(status.lastSuccess?new Date(status.lastSuccess).toLocaleString():'waiting for first checkpoint');
+}
+async function start(){
+ const response=await fetch(base+'/definition',{credentials:'same-origin',cache:'no-store'});if(!response.ok)throw new Error('Cannot load definition (HTTP '+response.status+')');definition=await response.json();
+ active=definition.dashboards[0];
+ for(const dashboard of definition.dashboards){const button=element('button',dashboard.title||dashboard.id);button.type='button';button.setAttribute('aria-pressed',dashboard===active);button.addEventListener('click',()=>{active=dashboard;for(const b of byID('nav').children)b.setAttribute('aria-pressed',b===button);byID('title').textContent=dashboard.title||dashboard.id;render();});byID('nav').append(button);}
+ byID('title').textContent=active.title||active.id;
+ source=new EventSource(base+'/events');source.onopen=()=>{byID('connection').textContent='Live';byID('error').textContent='';};source.onerror=()=>{byID('connection').textContent='Disconnected · retrying…';};source.addEventListener('snapshot',event=>{try{latest=JSON.parse(event.data);render();}catch(error){byID('error').textContent=error.message;}});
+ source.addEventListener('update',event=>{try{
+  const update=JSON.parse(event.data);if(!latest)return;
+  for(const [id,data]of Object.entries(update.series)){
+   const old=latest.series[id].history,first=data.history[0]?.[0]??Infinity;
+   data.history=old.filter(p=>p[0]<first&&p[0]>update.time-definition.historyMs).concat(data.history);
+  }
+  latest=update;render();
+ }catch(error){byID('error').textContent=error.message;}});
+}
+window.addEventListener('pagehide',()=>source?.close());
+start().catch(error=>{byID('connection').textContent='Unavailable';byID('error').textContent=error.message;});
+</script>
+</body>
+</html>
